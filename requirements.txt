@@ -1,0 +1,15 @@
+# Core
+vanna[gemini,sqlite]>=2.0.0
+fastapi
+uvicorn[standard]
+plotly
+pandas
+python-dotenv
+
+# LLM provider — Option A (Google Gemini, default)
+google-genai
+
+# LLM provider — Option B (Groq, OpenAI-compatible) — uncomment if using Groq
+# groq
+
+# LLM provider — Option C (Ollama) — no extra package; install Ollama app separately
