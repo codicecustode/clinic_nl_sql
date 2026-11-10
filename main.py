@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from vanna.core.user import RequestContext
 from vanna.tools.run_sql import DataFrameComponent
 
-from vanna_setup import agent, agent_memory
+from vanna_setup import agent, agent_memory, get_agent, get_fallback_agent, get_available_providers, agents
 
 # Logging
 logging.basicConfig(
@@ -184,6 +184,13 @@ class ChatResponse(BaseModel):
     cached: bool = False
 
 
+
+# /models endpoint
+@app.get("/models", tags=["Models"])
+async def list_models():
+    return {"providers": get_available_providers()}
+
+
 # /chat endpoint
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"])
 async def chat(request: Request, body: ChatRequest):
@@ -201,22 +208,33 @@ async def chat(request: Request, body: ChatRequest):
         cached_resp["cached"] = True
         return ChatResponse(**cached_resp)
 
-    # Call Vanna Agent
+    # Call Vanna Agent with fallback
+    current_agent, provider_used = get_agent()
+    req_context = RequestContext()
+    conv_id = f"chat-{uuid.uuid4().hex[:8]}"
+
     try:
-        req_context = RequestContext()
-        conv_id = f"chat-{uuid.uuid4().hex[:8]}"
-
-        # Collect ALL chunks first, then parse
         all_chunks = []
-        async for chunk in agent.send_message(req_context, question, conversation_id=conv_id):
+        async for chunk in current_agent.send_message(req_context, question, conversation_id=conv_id):
             all_chunks.append(chunk)
-
         parsed = parse_chunks(all_chunks)
-        log.info(f"[chat] parsed: sql={bool(parsed['sql'])}, rows={parsed['row_count']}, text_len={len(parsed['text'])}")
+        log.info(f"[chat] parsed ({provider_used}): sql={bool(parsed['sql'])}, rows={parsed['row_count']}")
 
     except Exception as exc:
-        log.error(f"[chat] agent error: {exc}", exc_info=True)
-        return ChatResponse(message=f"Agent error: {exc}")
+        log.warning(f"[chat] {provider_used} failed: {exc}, trying fallback...")
+        fallback = get_fallback_agent(provider_used)
+        if fallback is None:
+            return ChatResponse(message=f"All providers failed. Last error: {exc}")
+        current_agent, provider_used = fallback
+        try:
+            all_chunks = []
+            async for chunk in current_agent.send_message(req_context, question, conversation_id=conv_id):
+                all_chunks.append(chunk)
+            parsed = parse_chunks(all_chunks)
+            log.info(f"[chat] parsed ({provider_used} fallback): sql={bool(parsed['sql'])}, rows={parsed['row_count']}")
+        except Exception as exc2:
+            log.error(f"[chat] fallback also failed: {exc2}", exc_info=True)
+            return ChatResponse(message=f"All providers failed. Error: {exc2}")
 
     #  Case 1: Agent returned data rows directly (RunSqlTool executed SQL)
     if parsed["rows"] and parsed["columns"]:
