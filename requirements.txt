@@ -6,10 +6,6 @@ plotly
 pandas
 python-dotenv
 
-# LLM provider — Option A (Google Gemini, default)
+# LLM providers
 google-genai
-
-# LLM provider — Option B (Groq, OpenAI-compatible) — uncomment if using Groq
-# groq
-
-# LLM provider — Option C (Ollama) — no extra package; install Ollama app separately
+openai
